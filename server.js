@@ -103,9 +103,9 @@ app.post('/api/wordle/guess', async (req, res) => {
     return res.status(400).json({ error: 'Invalid guess' });
   }
 
-  const normalized = guess.toLowerCase();
-  if (!VALID_WORDS.has(normalized)) {
-    return res.status(400).json({ error: 'Not in word list' });
+  const normalized = guess.toLowerCase().replace(/[^a-z]/g, '');
+  if (normalized.length !== 5) {
+    return res.status(400).json({ error: 'Guess must be 5 letters' });
   }
 
   const gameDate = getTodayDate();
