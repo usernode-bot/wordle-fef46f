@@ -3,58 +3,573 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>wordle</title>
+  <title>Wordle</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>tailwind.config = { darkMode: 'class' }</script>
+  <style>
+    * { box-sizing: border-box; }
+
+    body { user-select: none; }
+
+    /* ---- Tile ---- */
+    .tile {
+      width: 62px;
+      height: 62px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      border: 2px solid #3f3f46;
+      color: #f4f4f5;
+      transition: border-color 0.05s;
+    }
+    .tile[data-state="tbd"]     { border-color: #71717a; }
+    .tile[data-state="correct"] { background: #538d4e; border-color: #538d4e; }
+    .tile[data-state="present"] { background: #b59f3b; border-color: #b59f3b; }
+    .tile[data-state="absent"]  { background: #3f3f46; border-color: #3f3f46; }
+
+    /* ---- Keyboard key colors ---- */
+    .key-correct { background: #538d4e !important; color: #fff !important; }
+    .key-present { background: #b59f3b !important; color: #fff !important; }
+    .key-absent  { background: #27272a !important; color: #52525b !important; }
+
+    /* ---- Animations ---- */
+    @keyframes tile-pop {
+      0%   { transform: scale(1); }
+      50%  { transform: scale(1.1); }
+      100% { transform: scale(1); }
+    }
+    .pop { animation: tile-pop 0.08s ease; }
+
+    @keyframes row-shake {
+      0%, 100% { transform: translateX(0); }
+      20%      { transform: translateX(-4px); }
+      40%      { transform: translateX(4px); }
+      60%      { transform: translateX(-4px); }
+      80%      { transform: translateX(4px); }
+    }
+    .shake { animation: row-shake 0.4s ease; }
+
+    @keyframes tile-bounce {
+      0%, 100% { transform: translateY(0); }
+      40%      { transform: translateY(-18px); }
+      60%      { transform: translateY(-10px); }
+    }
+    .bounce { animation: tile-bounce 0.5s ease; }
+
+    /* ---- Toast ---- */
+    #toast {
+      position: fixed;
+      top: 72px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #f4f4f5;
+      color: #09090b;
+      padding: 8px 20px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      z-index: 200;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+    #toast.show { opacity: 1; }
+
+    /* ---- Guess distribution bar ---- */
+    .dist-bar {
+      display: flex;
+      align-items: center;
+      height: 20px;
+      min-width: 20px;
+      padding: 0 6px;
+      border-radius: 2px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: white;
+      transition: width 0.4s ease;
+    }
+  </style>
 </head>
-<body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col items-center justify-center gap-8 p-4">
-  <h1 class="text-2xl font-bold">wordle</h1>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col items-center">
 
-  <button id="press-btn" class="w-32 h-32 rounded-full bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white text-xl font-bold shadow-lg shadow-violet-600/30">
-    Press!
-  </button>
+  <!-- Header -->
+  <header class="w-full max-w-[500px] border-b border-zinc-800 flex items-center justify-between px-4 py-3 shrink-0">
+    <button id="stats-btn" class="text-zinc-500 hover:text-zinc-100 transition-colors p-1" title="Statistics">
+      <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <rect x="2" y="13" width="4" height="9" rx="1"/><rect x="9" y="8" width="4" height="14" rx="1"/><rect x="16" y="3" width="4" height="19" rx="1"/>
+      </svg>
+    </button>
+    <h1 class="text-2xl font-black tracking-[0.3em]">WORDLE</h1>
+    <button id="lb-btn" class="text-zinc-500 hover:text-zinc-100 transition-colors p-1" title="Leaderboard">
+      <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+      </svg>
+    </button>
+  </header>
 
-  <div id="count" class="text-lg text-zinc-400">0 total presses</div>
+  <!-- Toast -->
+  <div id="toast"></div>
 
-  <div class="w-full max-w-sm">
-    <h2 class="text-sm font-medium text-zinc-500 mb-2 text-center">Leaderboard</h2>
-    <div id="leaderboard" class="space-y-1"></div>
+  <!-- Board -->
+  <div class="flex-1 flex items-center justify-center py-4">
+    <div id="board" class="flex flex-col gap-[5px]"></div>
+  </div>
+
+  <!-- Keyboard -->
+  <div id="keyboard" class="w-full max-w-[500px] px-2 pb-6 flex flex-col gap-[6px] shrink-0"></div>
+
+  <!-- ===== Stats Modal ===== -->
+  <div id="stats-modal" class="hidden fixed inset-0 bg-black/75 flex items-center justify-center z-50 p-4">
+    <div class="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-sm relative">
+      <button id="close-stats" class="absolute top-4 right-4 text-zinc-500 hover:text-zinc-100">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+      <h2 class="text-sm font-bold tracking-[0.2em] text-center mb-5">STATISTICS</h2>
+      <div id="stats-content">
+        <p class="text-center text-zinc-500 text-sm">Sign in to track your stats.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Leaderboard Modal ===== -->
+  <div id="lb-modal" class="hidden fixed inset-0 bg-black/75 flex items-center justify-center z-50 p-4">
+    <div class="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-sm relative max-h-[85vh] flex flex-col">
+      <button id="close-lb" class="absolute top-4 right-4 text-zinc-500 hover:text-zinc-100">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+      <h2 class="text-sm font-bold tracking-[0.2em] text-center mb-5">LEADERBOARD</h2>
+      <div id="lb-content" class="overflow-y-auto flex-1 space-y-1 pr-1"></div>
+    </div>
   </div>
 
   <script>
+    // ── Auth ──────────────────────────────────────────────────────────────────
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token') || '';
-    const headers = token ? { 'x-usernode-token': token } : {};
+    const authHeaders = token ? { 'x-usernode-token': token } : {};
+    const jsonHeaders = { 'Content-Type': 'application/json', ...authHeaders };
 
-    async function loadLeaderboard() {
-      const res = await fetch('/api/leaderboard');
-      const { leaderboard } = await res.json();
-      const el = document.getElementById('leaderboard');
-      if (!leaderboard.length) {
-        el.innerHTML = '<p class="text-center text-zinc-600 text-sm">No presses yet</p>';
-        return;
+    // ── Constants ─────────────────────────────────────────────────────────────
+    const ROWS = 6;
+    const COLS = 5;
+    const KEYBOARD_LAYOUT = [
+      ['Q','W','E','R','T','Y','U','I','O','P'],
+      ['A','S','D','F','G','H','J','K','L'],
+      ['ENTER','Z','X','C','V','B','N','M','⌫'],
+    ];
+
+    // ── State ─────────────────────────────────────────────────────────────────
+    let guesses = [];       // committed guess strings
+    let results = [];       // result arrays per guess
+    let currentInput = '';  // letters typed so far
+    let gameOver = false;
+    let didWin = false;
+    let revealedWord = '';
+    let isAnimating = false;
+    let keyStates = {};     // letter → 'correct'|'present'|'absent'
+
+    // ── Build Board ───────────────────────────────────────────────────────────
+    const boardEl = document.getElementById('board');
+    const rows = [];  // rows[r][c] = tile element
+
+    for (let r = 0; r < ROWS; r++) {
+      const rowEl = document.createElement('div');
+      rowEl.className = 'flex gap-[5px]';
+      const tileCols = [];
+      for (let c = 0; c < COLS; c++) {
+        const tile = document.createElement('div');
+        tile.className = 'tile';
+        tile.setAttribute('data-state', 'empty');
+        rowEl.appendChild(tile);
+        tileCols.push(tile);
       }
-      el.innerHTML = leaderboard.map((r, i) =>
-        '<div class="flex justify-between px-3 py-1 rounded ' + (i === 0 ? 'bg-violet-600/20 text-violet-300' : 'text-zinc-400') + '">' +
-        '<span>' + (i + 1) + '. ' + r.username + '</span>' +
-        '<span class="font-mono">' + r.presses + '</span></div>'
-      ).join('');
-      const total = leaderboard.reduce((s, r) => s + parseInt(r.presses), 0);
-      document.getElementById('count').textContent = total + ' total presses';
+      boardEl.appendChild(rowEl);
+      rows.push({ el: rowEl, tiles: tileCols });
     }
 
-    document.getElementById('press-btn').addEventListener('click', async () => {
+    // ── Build Keyboard ────────────────────────────────────────────────────────
+    const keyboardEl = document.getElementById('keyboard');
+
+    function buildKeyboard() {
+      for (const row of KEYBOARD_LAYOUT) {
+        const rowEl = document.createElement('div');
+        rowEl.className = 'flex justify-center gap-[6px]';
+        for (const key of row) {
+          const btn = document.createElement('button');
+          btn.dataset.key = key;
+          btn.id = 'key-' + key;
+          btn.textContent = key;
+          const wide = key === 'ENTER' || key === '⌫';
+          btn.className = [
+            'h-14 rounded font-bold text-sm uppercase',
+            'bg-zinc-600 hover:bg-zinc-500 text-zinc-100',
+            'transition-colors cursor-pointer select-none',
+            wide ? 'px-3 min-w-[65px] text-xs' : 'w-[42px]',
+          ].join(' ');
+          rowEl.appendChild(btn);
+        }
+        keyboardEl.appendChild(rowEl);
+      }
+    }
+    buildKeyboard();
+
+    // ── Toast ─────────────────────────────────────────────────────────────────
+    let toastTimer = null;
+    function showToast(msg, ms = 1400) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.remove('show'), ms);
+    }
+
+    // ── Tile helpers ──────────────────────────────────────────────────────────
+    function setTile(r, c, letter, state) {
+      const tile = rows[r].tiles[c];
+      tile.textContent = letter;
+      tile.setAttribute('data-state', state);
+    }
+
+    function popTile(r, c) {
+      const tile = rows[r].tiles[c];
+      tile.classList.remove('pop');
+      void tile.offsetWidth;
+      tile.classList.add('pop');
+      tile.addEventListener('animationend', () => tile.classList.remove('pop'), { once: true });
+    }
+
+    function shakeRow(r) {
+      const el = rows[r].el;
+      el.classList.remove('shake');
+      void el.offsetWidth;
+      el.classList.add('shake');
+      el.addEventListener('animationend', () => el.classList.remove('shake'), { once: true });
+    }
+
+    function bounceRow(r) {
+      rows[r].tiles.forEach((tile, i) => {
+        setTimeout(() => {
+          tile.classList.add('bounce');
+          tile.addEventListener('animationend', () => tile.classList.remove('bounce'), { once: true });
+        }, i * 70);
+      });
+    }
+
+    // Flip a single tile to reveal its state
+    function flipTile(tile, state, delay) {
+      return new Promise(resolve => {
+        setTimeout(() => {
+          tile.style.transition = 'transform 0.22s ease-in';
+          tile.style.transform = 'rotateX(90deg)';
+          setTimeout(() => {
+            tile.setAttribute('data-state', state);
+            tile.style.transition = 'transform 0.22s ease-out';
+            tile.style.transform = 'rotateX(0deg)';
+            setTimeout(resolve, 220);
+          }, 220);
+        }, delay);
+      });
+    }
+
+    async function revealRow(r, result) {
+      await Promise.all(
+        rows[r].tiles.map((tile, c) => flipTile(tile, result[c], c * 280))
+      );
+    }
+
+    // ── Key color tracking ────────────────────────────────────────────────────
+    const STATE_PRIORITY = { correct: 3, present: 2, absent: 1 };
+
+    function updateKeyState(letter, state) {
+      const current = keyStates[letter];
+      if ((STATE_PRIORITY[state] || 0) > (STATE_PRIORITY[current] || 0)) {
+        keyStates[letter] = state;
+        const btn = document.getElementById('key-' + letter.toUpperCase());
+        if (!btn) return;
+        btn.classList.remove('key-correct', 'key-present', 'key-absent');
+        btn.classList.add('key-' + state);
+      }
+    }
+
+    // ── Render current input ──────────────────────────────────────────────────
+    function renderInput() {
+      const r = guesses.length;
+      if (r >= ROWS) return;
+      for (let c = 0; c < COLS; c++) {
+        const letter = currentInput[c] || '';
+        setTile(r, c, letter, letter ? 'tbd' : 'empty');
+      }
+    }
+
+    // ── Input handlers ────────────────────────────────────────────────────────
+    function addLetter(letter) {
+      if (gameOver || isAnimating || currentInput.length >= COLS) return;
+      currentInput += letter.toLowerCase();
+      const c = currentInput.length - 1;
+      setTile(guesses.length, c, letter.toUpperCase(), 'tbd');
+      popTile(guesses.length, c);
+    }
+
+    function deleteLetter() {
+      if (gameOver || isAnimating || currentInput.length === 0) return;
+      currentInput = currentInput.slice(0, -1);
+      setTile(guesses.length, currentInput.length, '', 'empty');
+    }
+
+    async function submitGuess() {
+      if (gameOver || isAnimating) return;
+      if (currentInput.length < COLS) {
+        showToast('Not enough letters');
+        shakeRow(guesses.length);
+        return;
+      }
+
+      isAnimating = true;
+      const guess = currentInput;
+
       try {
-        const res = await fetch('/api/press', {
+        const res = await fetch('/api/wordle/guess', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...headers },
+          headers: jsonHeaders,
+          body: JSON.stringify({ guess }),
         });
-        if (res.ok) loadLeaderboard();
-        else if (res.status === 401) document.getElementById('count').textContent = 'Sign in to press!';
-      } catch {}
+        const data = await res.json();
+
+        if (!res.ok) {
+          showToast(data.error || 'Error');
+          shakeRow(guesses.length);
+          isAnimating = false;
+          return;
+        }
+
+        const { result, won: won_, gameOver: over, word } = data;
+        const r = guesses.length;
+
+        guesses.push(guess);
+        results.push(result);
+        currentInput = '';
+        saveLocal();
+
+        await revealRow(r, result);
+
+        // Update keyboard colors
+        for (let i = 0; i < COLS; i++) updateKeyState(guess[i], result[i]);
+
+        const isOver = over || (won_ || guesses.length >= ROWS);
+        if (isOver) {
+          gameOver = true;
+          didWin = won_;
+          revealedWord = word || '';
+          saveLocal();
+
+          if (won_) {
+            bounceRow(r);
+            const msgs = ['Genius!', 'Magnificent!', 'Impressive!', 'Splendid!', 'Great!', 'Phew!'];
+            showToast(msgs[r] || 'Nice!', 2200);
+            setTimeout(() => openStats(), 2800);
+          } else {
+            showToast(revealedWord.toUpperCase(), 3500);
+            setTimeout(() => openStats(), 4200);
+          }
+        }
+      } catch {
+        showToast('Network error');
+      }
+
+      isAnimating = false;
+    }
+
+    // ── Physical keyboard ─────────────────────────────────────────────────────
+    document.addEventListener('keydown', e => {
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      if (e.key === 'Enter') submitGuess();
+      else if (e.key === 'Backspace') deleteLetter();
+      else if (/^[a-zA-Z]$/.test(e.key)) addLetter(e.key);
     });
 
-    loadLeaderboard();
+    // ── On-screen keyboard ────────────────────────────────────────────────────
+    keyboardEl.addEventListener('click', e => {
+      const btn = e.target.closest('[data-key]');
+      if (!btn) return;
+      const key = btn.dataset.key;
+      if (key === 'ENTER') submitGuess();
+      else if (key === '⌫') deleteLetter();
+      else addLetter(key);
+    });
+
+    // ── Local storage (guest / backup) ────────────────────────────────────────
+    function localKey() {
+      return 'wordle-' + new Date().toISOString().split('T')[0];
+    }
+    function saveLocal() {
+      try {
+        localStorage.setItem(localKey(), JSON.stringify({ guesses, results, gameOver, didWin, revealedWord }));
+      } catch {}
+    }
+    function restoreLocal() {
+      try {
+        const saved = localStorage.getItem(localKey());
+        if (!saved) return false;
+        const s = JSON.parse(saved);
+        guesses = s.guesses || [];
+        results = s.results || [];
+        gameOver = s.gameOver || false;
+        didWin = s.didWin || false;
+        revealedWord = s.revealedWord || '';
+        renderSavedState();
+        return true;
+      } catch { return false; }
+    }
+
+    function renderSavedState() {
+      for (let r = 0; r < guesses.length; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const state = results[r][c];
+          setTile(r, c, guesses[r][c].toUpperCase(), state);
+          updateKeyState(guesses[r][c], state);
+        }
+      }
+      if (gameOver && !didWin && revealedWord) {
+        setTimeout(() => showToast(revealedWord.toUpperCase(), 3000), 400);
+      }
+    }
+
+    // ── Load game state ───────────────────────────────────────────────────────
+    async function loadGame() {
+      try {
+        const res = await fetch('/api/wordle/daily', { headers: authHeaders });
+        const { game } = await res.json();
+
+        if (game) {
+          guesses = game.guesses;
+          results = game.results;
+          gameOver = game.completed;
+          didWin = game.won || false;
+          revealedWord = game.word || '';
+          renderSavedState();
+        } else {
+          restoreLocal();
+        }
+      } catch {
+        restoreLocal();
+      }
+    }
+
+    // ── Stats modal ───────────────────────────────────────────────────────────
+    function openStats() {
+      document.getElementById('stats-modal').classList.remove('hidden');
+      if (token) loadStats();
+    }
+
+    document.getElementById('stats-btn').addEventListener('click', openStats);
+    document.getElementById('close-stats').addEventListener('click', () => {
+      document.getElementById('stats-modal').classList.add('hidden');
+    });
+    document.getElementById('stats-modal').addEventListener('click', e => {
+      if (e.target === e.currentTarget) e.currentTarget.classList.add('hidden');
+    });
+
+    async function loadStats() {
+      const el = document.getElementById('stats-content');
+      try {
+        const res = await fetch('/api/wordle/stats', { headers: authHeaders });
+        if (!res.ok) { el.innerHTML = '<p class="text-center text-zinc-500 text-sm">Could not load stats.</p>'; return; }
+        const s = await res.json();
+
+        const dist = s.guess_distribution;
+        const maxVal = Math.max(...Object.values(dist).map(Number), 1);
+
+        el.innerHTML = `
+          <div class="grid grid-cols-4 gap-3 text-center mb-6">
+            ${[
+              [s.games_played, 'Played'],
+              [s.win_pct + '%', 'Win %'],
+              [s.current_streak, 'Streak'],
+              [s.max_streak, 'Best'],
+            ].map(([v, label]) => `
+              <div>
+                <div class="text-3xl font-black">${v}</div>
+                <div class="text-[10px] text-zinc-500 leading-tight mt-1">${label}</div>
+              </div>`).join('')}
+          </div>
+          <div class="text-[11px] font-bold tracking-widest text-zinc-500 mb-3 text-center">GUESS DISTRIBUTION</div>
+          <div class="space-y-1">
+            ${[1,2,3,4,5,6].map(n => {
+              const count = Number(dist[String(n)] || 0);
+              const pct = Math.max(Math.round((count / maxVal) * 100), 8);
+              const highlight = gameOver && didWin && guesses.length === n;
+              return `<div class="flex items-center gap-2 text-sm">
+                <span class="w-3 text-right text-zinc-400">${n}</span>
+                <div class="flex-1">
+                  <div class="dist-bar ${highlight ? 'bg-[#538d4e]' : 'bg-zinc-600'}" style="width:${pct}%">${count}</div>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>
+        `;
+      } catch {
+        el.innerHTML = '<p class="text-center text-zinc-500 text-sm">Failed to load stats.</p>';
+      }
+    }
+
+    // ── Leaderboard modal ─────────────────────────────────────────────────────
+    document.getElementById('lb-btn').addEventListener('click', () => {
+      document.getElementById('lb-modal').classList.remove('hidden');
+      loadLeaderboard();
+    });
+    document.getElementById('close-lb').addEventListener('click', () => {
+      document.getElementById('lb-modal').classList.add('hidden');
+    });
+    document.getElementById('lb-modal').addEventListener('click', e => {
+      if (e.target === e.currentTarget) e.currentTarget.classList.add('hidden');
+    });
+
+    async function loadLeaderboard() {
+      const el = document.getElementById('lb-content');
+      el.innerHTML = '<p class="text-center text-zinc-500 text-sm py-4">Loading…</p>';
+      try {
+        const res = await fetch('/api/wordle/leaderboard');
+        const { leaderboard } = await res.json();
+        if (!leaderboard.length) {
+          el.innerHTML = '<p class="text-center text-zinc-500 text-sm py-4">No players yet — be the first!</p>';
+          return;
+        }
+        el.innerHTML = `
+          <div class="flex text-[10px] text-zinc-600 uppercase tracking-wider pb-2 border-b border-zinc-800 font-semibold">
+            <span class="w-6">#</span>
+            <span class="flex-1">Player</span>
+            <span class="w-10 text-right">Wins</span>
+            <span class="w-12 text-right">Win%</span>
+            <span class="w-14 text-right">Streak</span>
+          </div>
+          ${leaderboard.map((r, i) => `
+            <div class="flex items-center text-sm py-1.5 border-b border-zinc-800/50 ${i === 0 ? 'text-yellow-400' : i === 1 ? 'text-zinc-300' : i === 2 ? 'text-amber-600' : 'text-zinc-400'}">
+              <span class="w-6 text-xs">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span>
+              <span class="flex-1 truncate font-medium">${escHtml(r.username)}</span>
+              <span class="w-10 text-right font-mono font-bold">${r.games_won}</span>
+              <span class="w-12 text-right font-mono text-zinc-500">${r.win_pct}%</span>
+              <span class="w-14 text-right font-mono text-zinc-500">${r.current_streak}🔥</span>
+            </div>`).join('')}
+        `;
+      } catch {
+        el.innerHTML = '<p class="text-center text-zinc-500 text-sm py-4">Failed to load leaderboard.</p>';
+      }
+    }
+
+    function escHtml(s) {
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // ── Start ─────────────────────────────────────────────────────────────────
+    loadGame();
   </script>
 </body>
 </html>
